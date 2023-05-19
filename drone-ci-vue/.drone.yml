@@ -1,0 +1,59 @@
+kind: pipeline
+type: docker
+name: default
+steps:
+  - name: build
+    pull: if-not-exists
+    image: node:17
+    commands:
+      - pwd
+      - ls -al
+      - npm install 
+      - npm run build
+      - ls -al ./dist
+  - name: pushHarbor
+    pull: if-not-exists
+    image: banzaicloud/drone-kaniko
+    settings: 
+      registry: 172.30.0.6
+      repo: test/website   #项目仓库地址/镜像名
+      #tags: v7                               #标签名      dron会自动调用dockerfile 生产镜像并且推送
+      #${DRONE_BUILD_NUMBER}  也可以使用 drone 变量 为 tag号
+      #auto_tag: true
+      tags: ${DRONE_BUILD_NUMBER}
+      contest: ./                          #dockerfile文件所在目录  表示当前目录下
+      cache: false
+      username:
+        from_secret: docker-username
+      password:
+        from_secret: docker-password
+  - name: publish
+    pull: if-not-exists
+    image: 172.30.0.6/test/drone-ssh:latest
+    settings: 
+      host:
+        - 172.30.0.97
+      username: root
+      password:
+        from_secret: ssh_password
+      port: 22
+      command_timeout: 2m
+      script:
+        - docker ps -a
+        - docker rm -f website
+        - docker ps -a 
+        - docker run -itd  -p 8001:80    --name website  172.30.0.6/test/website:${DRONE_BUILD_NUMBER}
+        - docker ps -a  
+  - name: 发送电报通知消息
+    pull: if-not-exists
+    image: 172.30.0.6/test/drone-telegram:latest
+    settings:
+      token: 6253449707:AAHrJoSbZYRSBwYBxzRf1wRsSYsFAwHQWOY
+      to: -1001968471791
+      message: >
+        {{#success build.status}}
+          第 {{build.number}} 次构建已完成，状态：构建成功
+        {{else}}
+          第 {{build.number}} 次构建已完成，状态：构建失败
+        {{/success}}
+        提交记录：{{commit.author}} - {{commit.message}}
